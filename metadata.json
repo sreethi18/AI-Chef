@@ -1,5 +1,7 @@
 {
   "name": "AI Cooking Assistant",
   "description": "An AI-powered cooking assistant that generates custom recipes based on the ingredients you have on hand. Simply list your ingredients and let the AI chef create a delicious meal for you with step-by-step instructions.",
-  "requestFramePermissions": []
+  "requestFramePermissions": [
+    "microphone"
+  ]
 }

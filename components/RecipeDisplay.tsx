@@ -1,75 +1,217 @@
-
-import React, { ReactNode } from 'react';
+import React, { useState, useEffect } from 'react';
+import { Recipe, scaleIngredients } from '../services/geminiService';
+import { ShareIcon } from './icons/ShareIcon';
 
 interface RecipeDisplayProps {
-    recipeMarkdown: string;
+    recipe: Recipe;
 }
 
-const RecipeDisplay: React.FC<RecipeDisplayProps> = ({ recipeMarkdown }) => {
+const DifficultyBadge: React.FC<{ difficulty: 'Easy' | 'Medium' | 'Hard' }> = ({ difficulty }) => {
+    const colors = {
+        Easy: 'bg-green-100 text-green-800',
+        Medium: 'bg-blue-100 text-blue-800',
+        Hard: 'bg-red-100 text-red-800',
+    };
+    return (
+        <span className={`px-3 py-1 text-sm font-medium rounded-full ${colors[difficulty]}`}>
+            {difficulty}
+        </span>
+    );
+};
 
-    const parseMarkdown = (markdown: string): ReactNode[] => {
-        const lines = markdown.split('\n');
-        const elements: ReactNode[] = [];
-        let listItems: string[] = [];
-        let listType: 'ul' | 'ol' | null = null;
+const NutritionInfo: React.FC<{ label: string; value: string }> = ({ label, value }) => (
+    <div className="p-3 bg-white rounded-lg shadow-sm border border-gray-200/80">
+        <p className="text-xs text-gray-500 uppercase tracking-wider">{label}</p>
+        <p className="font-bold text-lg text-blue-800">{value}</p>
+    </div>
+);
 
-        const closeList = () => {
-            if (listItems.length > 0 && listType) {
-                const listKey = `list-${elements.length}`;
-                if (listType === 'ul') {
-                    elements.push(
-                        <ul key={listKey} className="space-y-2 pl-5 list-disc">
-                            {listItems.map((item, i) => <li key={i} className="text-slate-600 leading-relaxed">{item}</li>)}
-                        </ul>
-                    );
-                } else {
-                     elements.push(
-                        <ol key={listKey} className="space-y-2 pl-5 list-decimal">
-                             {listItems.map((item, i) => <li key={i} className="text-slate-600 leading-relaxed marker:font-semibold">{item}</li>)}
-                        </ol>
-                    );
-                }
-                listItems = [];
-                listType = null;
-            }
+
+const RecipeDisplay: React.FC<RecipeDisplayProps> = ({ recipe }) => {
+    const [servings, setServings] = useState(recipe.servings);
+    const [scaledIngredients, setScaledIngredients] = useState(recipe.ingredients);
+    const [isScaling, setIsScaling] = useState(false);
+    const [scaleError, setScaleError] = useState<string | null>(null);
+    const [isCopied, setIsCopied] = useState(false);
+
+    // Reset state when a new recipe is passed in
+    useEffect(() => {
+        setServings(recipe.servings);
+        setScaledIngredients(recipe.ingredients);
+        setIsScaling(false);
+        setScaleError(null);
+        setIsCopied(false);
+    }, [recipe]);
+
+    const handleScaleRecipe = async () => {
+        if (servings === recipe.servings || servings < 1) {
+            setScaledIngredients(recipe.ingredients); // Reset to original if invalid or unchanged
+            return;
         };
 
-        lines.forEach((line, index) => {
-            const trimmedLine = line.trim();
-
-            if (trimmedLine.startsWith('## ')) {
-                closeList();
-                elements.push(<h2 key={index} className="text-3xl font-bold mt-4 mb-4 text-amber-800 border-b-2 border-amber-200 pb-2">{trimmedLine.substring(3)}</h2>);
-            } else if (trimmedLine.startsWith('### ')) {
-                closeList();
-                elements.push(<h3 key={index} className="text-xl font-bold mt-6 mb-2 text-slate-700">{trimmedLine.substring(4)}</h3>);
-            } else if (trimmedLine.startsWith('- ') || trimmedLine.startsWith('* ')) {
-                 if (listType !== 'ul') {
-                    closeList();
-                    listType = 'ul';
-                }
-                listItems.push(trimmedLine.substring(2));
-            } else if (/^\d+\.\s/.test(trimmedLine)) {
-                if (listType !== 'ol') {
-                    closeList();
-                    listType = 'ol';
-                }
-                listItems.push(trimmedLine.replace(/^\d+\.\s/, ''));
-            } else if (trimmedLine.length > 0) {
-                closeList();
-                elements.push(<p key={index} className="text-slate-600 leading-relaxed mb-2">{trimmedLine}</p>);
-            }
-        });
-        
-        closeList(); // Ensure any trailing list is closed
-
-        return elements;
+        setIsScaling(true);
+        setScaleError(null);
+        try {
+            const newIngredients = await scaleIngredients(recipe.ingredients, recipe.servings, servings);
+            setScaledIngredients(newIngredients);
+        } catch (e: any) {
+            setScaleError(e.message || "An unknown error occurred while scaling.");
+        } finally {
+            setIsScaling(false);
+        }
     };
 
+    const handleShare = async () => {
+        const shareText = `Check out this recipe: ${recipe.recipeName}\n\n${recipe.description}\n\nIngredients:\n${scaledIngredients.join('\n')}\n\nInstructions:\n${recipe.instructions.map((step, i) => `${i + 1}. ${step}`).join('\n')}\n\nGenerated by AI Cooking Assistant.`;
+
+        if (navigator.share) {
+            try {
+                await navigator.share({
+                    title: recipe.recipeName,
+                    text: shareText,
+                });
+            } catch (error) {
+                console.log('Web Share API canceled or failed:', error);
+            }
+        } else {
+            try {
+                await navigator.clipboard.writeText(shareText);
+                setIsCopied(true);
+                setTimeout(() => setIsCopied(false), 2000); // Reset after 2 seconds
+            } catch (error) {
+                console.error('Failed to copy recipe to clipboard: ', error);
+                alert('Failed to copy recipe.');
+            }
+        }
+    };
 
     return (
-        <article className="prose max-w-none p-6 bg-amber-50/50 rounded-lg border border-amber-200">
-            {parseMarkdown(recipeMarkdown)}
+        <article className="space-y-6 p-6 bg-white rounded-lg border border-gray-200">
+            {/* Header */}
+            <header className="space-y-3">
+                <div className="flex justify-between items-start gap-4">
+                    <h2 className="text-3xl font-bold text-gray-900 border-b-2 border-gray-100 pb-2 flex-grow">
+                        {recipe.recipeName}
+                    </h2>
+                     <button
+                        onClick={handleShare}
+                        className="flex-shrink-0 flex items-center gap-2 px-4 py-2 text-sm font-medium rounded-full border transition-all duration-200 bg-white text-gray-700 border-gray-300 hover:bg-gray-100 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500"
+                        aria-label="Share recipe"
+                    >
+                        <ShareIcon className="h-5 w-5" />
+                        {isCopied ? 'Copied!' : 'Share'}
+                    </button>
+                </div>
+
+                <div className="flex flex-wrap items-center gap-3">
+                    <DifficultyBadge difficulty={recipe.difficulty} />
+                    <span className="flex items-center gap-1.5 px-3 py-1 text-sm font-medium rounded-full bg-gray-100 text-gray-800">
+                        <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+                        </svg>
+                        {recipe.totalTime}
+                    </span>
+                     <span className="flex items-center gap-1.5 px-3 py-1 text-sm font-medium rounded-full bg-gray-100 text-gray-800">
+                        <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2">
+                           <path strokeLinecap="round" strokeLinejoin="round" d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.653-.124-1.282-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.653.124-1.282.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0zM7 10a2 2 0 11-4 0 2 2 0 014 0z" />
+                        </svg>
+                        Serves {recipe.servings}
+                    </span>
+                </div>
+                <p className="text-gray-600 pt-2">{recipe.description}</p>
+            </header>
+
+             {/* Nutrition */}
+            {recipe.nutrition && (
+                 <div className="pt-4">
+                    <h3 className="text-xl font-bold text-gray-800 mb-3">Estimated Nutrition <span className="text-sm font-normal text-gray-500">(per serving)</span></h3>
+                    <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-center">
+                        <NutritionInfo label="Calories" value={recipe.nutrition.calories} />
+                        <NutritionInfo label="Protein" value={recipe.nutrition.protein} />
+                        <NutritionInfo label="Carbs" value={recipe.nutrition.carbs} />
+                        <NutritionInfo label="Fat" value={recipe.nutrition.fat} />
+                    </div>
+                </div>
+            )}
+            
+            {/* Main Content */}
+            <div className="grid md:grid-cols-3 gap-8 pt-4 border-t border-gray-200">
+                {/* Ingredients */}
+                <div className="md:col-span-1">
+                    <h3 className="text-xl font-bold text-gray-800 mb-3">Ingredients</h3>
+                    
+                    {/* Scaling UI */}
+                    <div className="p-3 bg-gray-100/70 rounded-lg mb-4 space-y-2 border border-gray-200">
+                        <label htmlFor="servings" className="block text-sm font-medium text-gray-700">
+                            Adjust Servings
+                        </label>
+                        <div className="flex items-center gap-2">
+                            <input 
+                                type="number" 
+                                id="servings"
+                                min="1"
+                                value={servings}
+                                onChange={(e) => setServings(Number(e.target.value))}
+                                className="w-20 p-1.5 border border-gray-300 rounded-md shadow-sm focus:ring-1 focus:ring-blue-500 focus:border-blue-500"
+                                disabled={isScaling}
+                                aria-label="Number of servings"
+                            />
+                            <button 
+                                onClick={handleScaleRecipe}
+                                disabled={isScaling || servings === recipe.servings || servings < 1}
+                                className="px-3 py-1.5 text-sm font-medium rounded-md shadow-sm text-white bg-blue-600 hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 disabled:bg-gray-400 disabled:cursor-not-allowed transition-colors"
+                            >
+                                {isScaling ? 'Scaling...' : 'Update'}
+                            </button>
+                        </div>
+                         {scaleError && (
+                            <div className="text-sm text-red-700 mt-2 p-2 bg-red-100 border border-red-200 rounded-md">
+                                {scaleError}
+                            </div>
+                        )}
+                    </div>
+
+                    <div className="relative">
+                        {isScaling && (
+                            <div className="absolute inset-0 bg-white/80 flex items-center justify-center rounded-lg z-10">
+                                <svg className="animate-spin h-6 w-6 text-blue-600" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                                </svg>
+                            </div>
+                        )}
+                        <ul className={`space-y-2 pl-5 list-disc transition-opacity ${isScaling ? 'opacity-50' : 'opacity-100'}`}>
+                            {scaledIngredients.map((item, i) => (
+                                <li key={i} className="text-gray-600 leading-relaxed">{item}</li>
+                            ))}
+                        </ul>
+                    </div>
+                </div>
+
+                {/* Instructions */}
+                <div className="md:col-span-2">
+                    <h3 className="text-xl font-bold text-gray-800 mb-3">Instructions</h3>
+                    <ol className="space-y-4 pl-5 list-decimal">
+                        {recipe.instructions.map((item, i) => (
+                            <li key={i} className="text-gray-700 leading-relaxed marker:font-semibold marker:text-blue-700">{item}</li>
+                        ))}
+                    </ol>
+                </div>
+            </div>
+
+            {/* Substitutions */}
+            {recipe.substitutions && recipe.substitutions.length > 0 && (
+                 <div className="pt-4 border-t border-gray-200">
+                    <h3 className="text-xl font-bold text-gray-800 mb-3">Substitutions & Tips</h3>
+                    <ul className="space-y-2 pl-5 list-disc">
+                        {recipe.substitutions.map((sub, i) => (
+                            <li key={i} className="text-gray-600 leading-relaxed">
+                               <strong className="font-semibold text-gray-700">{sub.missingIngredient}:</strong> {sub.suggestion}
+                            </li>
+                        ))}
+                    </ul>
+                </div>
+            )}
         </article>
     );
 };
