@@ -1,17 +1,18 @@
 import { GoogleGenAI, Type } from "@google/genai";
 
-const apiKey = process.env.API_KEY;
-if (!apiKey) {
-    console.warn("API_KEY environment variable not set");
-}
-
-const ai = new GoogleGenAI({ apiKey: apiKey || '' });
+// Fix: Initialize GoogleGenAI with API_KEY from environment variables directly as per guidelines.
+const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
 
 export interface Nutrition {
     calories: string;
     protein: string;
     carbs: string;
     fat: string;
+}
+
+export interface InstructionStep {
+    text: string;
+    duration?: number; // Duration in minutes
 }
 
 export interface Recipe {
@@ -21,7 +22,7 @@ export interface Recipe {
     totalTime: string;
     servings: number;
     ingredients: string[];
-    instructions: string[];
+    instructions: InstructionStep[];
     substitutions?: {
         missingIngredient: string;
         suggestion: string;
@@ -44,8 +45,15 @@ const schema: any = {
         },
         instructions: {
             type: Type.ARRAY,
-            items: { type: Type.STRING },
-            description: "Clear, numbered, step-by-step instructions for preparing the dish."
+            items: {
+                type: Type.OBJECT,
+                properties: {
+                    text: { type: Type.STRING, description: "The text of the instruction step." },
+                    duration: { type: Type.NUMBER, description: "If this step involves a specific cooking time (e.g., 'simmer for 10 minutes'), provide the duration here in whole minutes. Omit if no specific time is mentioned." }
+                },
+                required: ['text']
+            },
+            description: "Clear, step-by-step instructions. For any step that includes a specific duration, extract it into the duration field."
         },
         substitutions: {
             type: Type.ARRAY,
@@ -97,8 +105,9 @@ export const generateRecipe = async (ingredients: string, dietaryRestrictions: s
         2.  Assume the user has common pantry staples (like salt, pepper, oil, water) and include them in the ingredient list if needed.
         3.  If you include pantry staples not explicitly listed by the user, provide potential substitutions in the 'substitutions' field in case they don't have them.
         4.  Provide all the necessary details for the recipe: name, a brief description, difficulty, total time, number of servings, a full ingredient list, and step-by-step instructions.
-        5.  Provide an estimated nutritional breakdown per serving (calories, protein, carbs, fat). If you cannot determine this accurately, you can omit the 'nutrition' field.
-        6.  Return the entire response as a single, valid JSON object that conforms to the provided schema. Do not include any markdown formatting or extra text outside of the JSON object.
+        5.  For the instructions, analyze each step. If a step contains a specific timed action (e.g., "bake for 30 minutes", "let it rest for 5 min"), you MUST populate the 'duration' field for that step with the number of minutes as an integer. Otherwise, omit the 'duration' field.
+        6.  Provide an estimated nutritional breakdown per serving (calories, protein, carbs, fat). If you cannot determine this accurately, you can omit the 'nutrition' field.
+        7.  Return the entire response as a single, valid JSON object that conforms to the provided schema. Do not include any markdown formatting or extra text outside of the JSON object.
     `;
 
     try {
@@ -113,14 +122,15 @@ export const generateRecipe = async (ingredients: string, dietaryRestrictions: s
         
         let recipeJson;
         try {
-            recipeJson = JSON.parse(response.text);
+            // Fix: Trim whitespace from the response before parsing JSON.
+            recipeJson = JSON.parse(response.text.trim());
         } catch (parseError) {
             console.error("JSON parsing error:", parseError);
             throw new Error("The AI returned a response in an unexpected format. Please try generating the recipe again.");
         }
 
         // Basic validation to ensure we have a usable recipe object
-        if (typeof recipeJson !== 'object' || recipeJson === null || !recipeJson.recipeName || !Array.isArray(recipeJson.ingredients)) {
+        if (typeof recipeJson !== 'object' || recipeJson === null || !recipeJson.recipeName || !Array.isArray(recipeJson.instructions)) {
             console.error("Invalid recipe structure:", recipeJson);
             throw new Error("The AI returned an incomplete recipe. Please try again.");
         }
@@ -168,7 +178,8 @@ export const scaleIngredients = async (
         
         let scaledIngredientsJson;
         try {
-            scaledIngredientsJson = JSON.parse(response.text);
+            // Fix: Trim whitespace from the response before parsing JSON.
+            scaledIngredientsJson = JSON.parse(response.text.trim());
         } catch(parseError) {
             console.error("JSON parsing error during scaling:", parseError);
             throw new Error("The AI returned an invalid format for scaled ingredients.");

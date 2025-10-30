@@ -29,6 +29,7 @@ const IngredientInput: React.FC<IngredientInputProps> = ({
     onDietaryChange
 }) => {
     const [isListening, setIsListening] = useState(false);
+    const [interimTranscript, setInterimTranscript] = useState('');
     const recognitionRef = useRef<any>(null);
     const isSpeechSupported = typeof window !== 'undefined' && ('SpeechRecognition' in window || 'webkitSpeechRecognition' in window);
 
@@ -40,7 +41,7 @@ const IngredientInput: React.FC<IngredientInputProps> = ({
         const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
         const recognition = new SpeechRecognition();
         recognition.continuous = true;
-        recognition.interimResults = false;
+        recognition.interimResults = true; // Enable interim results for real-time feedback
         recognition.lang = 'en-US';
 
         recognition.onstart = () => {
@@ -48,18 +49,37 @@ const IngredientInput: React.FC<IngredientInputProps> = ({
         };
         recognition.onend = () => {
             setIsListening(false);
+            setInterimTranscript(''); // Clean up on stop
         };
         recognition.onerror = (event: any) => {
             console.error("Speech recognition error:", event.error);
             setIsListening(false);
+            setInterimTranscript(''); // Clean up on error
         };
         
         recognition.onresult = (event: any) => {
-            let transcript = '';
+            let interim = '';
+            let final = '';
+
             for (let i = event.resultIndex; i < event.results.length; ++i) {
-                transcript += event.results[i][0].transcript;
+                if (event.results[i].isFinal) {
+                    final += event.results[i][0].transcript;
+                } else {
+                    interim += event.results[i][0].transcript;
+                }
             }
-            setIngredients(prev => (prev ? prev + ' ' : '') + transcript.trim());
+            
+            // Append the final transcript to the ingredients list
+            if (final.trim()) {
+                setIngredients(prev => {
+                    const trimmedPrev = prev.trim();
+                    if (!trimmedPrev) return final.trim();
+                    // Add a comma separator for a clean list
+                    return `${trimmedPrev}, ${final.trim()}`;
+                });
+            }
+            // Update the interim transcript for visual feedback
+            setInterimTranscript(interim);
         };
 
         recognitionRef.current = recognition;
@@ -112,6 +132,18 @@ const IngredientInput: React.FC<IngredientInputProps> = ({
                          </button>
                     )}
                 </div>
+                {isListening && (
+                    <div className="mt-2 px-3 py-2 bg-gray-100 rounded-lg text-sm text-gray-800 h-10 flex items-center overflow-hidden">
+                        <span className="mr-2 flex items-center flex-shrink-0">
+                            <span className="relative flex h-3 w-3">
+                                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-red-400 opacity-75"></span>
+                                <span className="relative inline-flex rounded-full h-3 w-3 bg-red-500"></span>
+                            </span>
+                            <span className="ml-2 font-medium">Listening...</span>
+                        </span>
+                        <span className="italic text-gray-500 truncate">{interimTranscript}</span>
+                    </div>
+                )}
             </div>
 
             <div>
